@@ -76,7 +76,7 @@ new Trie:g_tTimeUnitWords;
 
 public plugin_init( )
 {
-	register_plugin( "AMXX Gag", "1.4.5", "xPaw & Exolent" );
+	register_plugin( "AMXX Gag", "1.4.5b", "xPaw & Exolent" );
 	
 	register_clcmd( "say",        "CmdSay" );
 	register_clcmd( "say_team",   "CmdTeamSay" );
@@ -528,7 +528,7 @@ public CmdAddGag( const id, const iLevel, const iCid )
 	
 	// regular expression for a simple check? meh.
 	
-	if( !equal( szArg, "STEAM_0:", 8 ) || !('0' <= szArg[ 8 ] <= '1') || szArg[ 9 ] != ':' || !is_str_num( szArg[ 10 ] ) )
+	if( szArg[ 9 ] != ':' || !( '0' <= szArg[ 8 ] <= '1' ) || !is_str_num( szArg[ 10 ] ) || !equal( szArg, "STEAM_0:", 8 ) )
 	{
 		console_print( id, "Invalid SteamID provided (%s). Must be in ^"STEAM_0:X:XXXXX^" format (remember to use quotes!)", szArg );
 		return PLUGIN_HANDLED;
@@ -551,6 +551,9 @@ public CmdAddGag( const id, const iLevel, const iCid )
 		console_print( id, "This user is already gagged!" );
 		return PLUGIN_HANDLED;
 	}
+	
+	new data[ GagData ];
+	copy( data[ GAG_AUTHID ], 34, szArg );
 	
 	get_pcvar_string( g_pCvarDefaultFlags, szArg, charsmax( szArg ) );
 	new iFlags = read_flags( szArg );
@@ -584,13 +587,11 @@ public CmdAddGag( const id, const iLevel, const iCid )
 	// convert to seconds
 	iGagTime *= g_iTimeUnitMult[ iTimeUnit ];
 	
-	new data[ GagData ];
 	data[ GAG_START ] = get_systime( );
 	data[ GAG_TIME ]  = iGagTime;
 	data[ GAG_FLAGS ] = iFlags;
-	copy( data[ GAG_AUTHID ], 34, szArg );
 	
-	TrieSetCell( g_tArrayPos, szArg, g_iGagged );
+	TrieSetCell( g_tArrayPos, data[ GAG_AUTHID ], g_iGagged );
 	ArrayPushArray( g_aGagData, data );
 	
 	new szFrom[ 64 ];
@@ -642,11 +643,11 @@ public CmdAddGag( const id, const iLevel, const iCid )
 		copy( szInfo, 31, "permanently" );
 	}
 	
-	show_activity( id, szAdmin, "Has gagged a non-connected player <%s> from speaking %s! (%s)", szArg, szInfo, szFrom );
+	show_activity( id, szAdmin, "Has gagged a non-connected player <%s> from speaking %s! (%s)", data[ GAG_AUTHID ], szInfo, szFrom );
 	
-	console_print( id, "You have gagged ^"%s^" (%s) !", szArg, szFrom );
+	console_print( id, "You have gagged ^"%s^" (%s) !", data[ GAG_AUTHID ], szFrom );
 	
-	log_amx( "Gag: ^"%s<%s>^" has gagged a non-connected player ^"<%s>^" %s. (%s)", szAdmin, g_szAuthid[ id ], szArg, szInfo, szFrom );
+	log_amx( "Gag: ^"%s<%s>^" has gagged a non-connected player ^"<%s>^" %s. (%s)", szAdmin, g_szAuthid[ id ], data[ GAG_AUTHID ], szInfo, szFrom );
 	
 	return PLUGIN_HANDLED;
 }
@@ -687,7 +688,25 @@ public CmdUnGagPlayer( const id, const iLevel, const iCid )
 	new iPlayer = cmd_target( id, szArg, CMDTARGET_OBEY_IMMUNITY | CMDTARGET_NO_BOTS );
 	
 	if( !iPlayer )
-		return PLUGIN_HANDLED;
+	{
+		// Maybe it's a steamid
+		
+		if( szArg[ 9 ] != ':' || !( '0' <= szArg[ 8 ] <= '1' ) || !is_str_num( szArg[ 10 ] ) || !equal( szArg, "STEAM_0:", 8 ) )
+		{
+			return PLUGIN_HANDLED;
+		}
+		
+		new iArrayPos;
+		if( TrieGetCell( g_tArrayPos, szArg, iArrayPos ) )
+		{
+			goto _DeleteGag;
+		}
+		else
+		{
+			console_print( id, "This steamid is not gagged!" );
+			return PLUGIN_HANDLED;
+		}
+	}
 	
 	new szName[ 32 ];
 	get_user_name( iPlayer, szName, 31 );
@@ -698,6 +717,8 @@ public CmdUnGagPlayer( const id, const iLevel, const iCid )
 		console_print( id, "User ^"%s^" is not gagged!", szName );
 		return PLUGIN_HANDLED;
 	}
+	
+	_DeleteGag:
 	
 	DeleteGag( iArrayPos );
 	
