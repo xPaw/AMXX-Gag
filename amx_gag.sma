@@ -686,6 +686,7 @@ public CmdUnGagPlayer( const id, const iLevel, const iCid )
 	}
 	
 	new iPlayer = cmd_target( id, szArg, CMDTARGET_OBEY_IMMUNITY | CMDTARGET_NO_BOTS );
+	new iArrayPos, szName[ 32 ];
 	
 	if( !iPlayer )
 	{
@@ -696,29 +697,24 @@ public CmdUnGagPlayer( const id, const iLevel, const iCid )
 			return PLUGIN_HANDLED;
 		}
 		
-		new iArrayPos;
-		if( TrieGetCell( g_tArrayPos, szArg, iArrayPos ) )
-		{
-			goto _DeleteGag;
-		}
-		else
+		if( !TrieGetCell( g_tArrayPos, szArg, iArrayPos ) )
 		{
 			console_print( id, "This steamid is not gagged!" );
 			return PLUGIN_HANDLED;
 		}
+		
+		copy( szName, charsmax( szName ), szArg );
 	}
-	
-	new szName[ 32 ];
-	get_user_name( iPlayer, szName, 31 );
-	
-	new iArrayPos;
-	if( !TrieGetCell( g_tArrayPos, g_szAuthid[ iPlayer ], iArrayPos ) )
+	else
 	{
-		console_print( id, "User ^"%s^" is not gagged!", szName );
-		return PLUGIN_HANDLED;
+		get_user_name( iPlayer, szName, charsmax( szName ) );
+		
+		if( !TrieGetCell( g_tArrayPos, g_szAuthid[ iPlayer ], iArrayPos ) )
+		{
+			console_print( id, "User ^"%s^" is not gagged!", szName );
+			return PLUGIN_HANDLED;
+		}
 	}
-	
-	_DeleteGag:
 	
 	DeleteGag( iArrayPos );
 	
