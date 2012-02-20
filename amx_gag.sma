@@ -2,8 +2,6 @@
 #include < amxmisc >
 #include < engine >
 
-//#define DEBUG_MESSAGES
-
 #define MAX_PLAYERS 32
 
 enum ( <<= 1 )
@@ -297,8 +295,6 @@ public FwdThink( const iEntity )
 	if( !g_iGagged )
 		return;
 	
-	log_amx( "[AMXX GAG DEBUG] Entity Thinking" );
-	
 	new iSystime = get_systime( );
 	new bool:bRemovedGags = false;
 	
@@ -306,10 +302,6 @@ public FwdThink( const iEntity )
 	for( new i = 0; i < g_iGagged; i++ )
 	{
 		ArrayGetArray( g_aGagData, i, data );
-		
-#if defined DEBUG_MESSAGES
-		log_amx( "[AMXX GAG DEBUG] Yeah, this gag: %i %i %i", data[ GAG_START ], data[ GAG_TIME ] + data[ GAG_START ], iSystime );
-#endif
 		
 		if( data[ GAG_TIME ] > 0 && ( data[ GAG_START ] + data[ GAG_TIME ] ) <= iSystime )
 		{
@@ -977,10 +969,6 @@ LoadFromFile( )
 			{
 				iTimeLeft = data[ GAG_START ] + data[ GAG_TIME ] - iSystime;
 				
-#if defined DEBUG_MESSAGES
-				log_amx( "[AMXX GAG DEBUG] iTimeLeft: %i - iShortestTime: %i", iTimeLeft, iShortestTime );
-#endif
-				
 				if( iTimeLeft <= 0 )
 				{
 					bRemovedGags = true;
@@ -993,10 +981,6 @@ LoadFromFile( )
 				}
 			}
 			
-#if defined DEBUG_MESSAGES
-			log_amx( "[AMXX GAG DEBUG] Loaded gag: %s %i %i", data[ GAG_AUTHID ], data[ GAG_TIME ], data[ GAG_START ] );
-#endif
-			
 			TrieSetCell( g_tArrayPos, data[ GAG_AUTHID ], g_iGagged );
 			ArrayPushArray( g_aGagData, data );
 			g_iGagged++;
@@ -1008,10 +992,6 @@ LoadFromFile( )
 		{
 			SaveToFile( );
 		}
-		
-#if defined DEBUG_MESSAGES
-		log_amx( "[AMXX GAG DEBUG] Final iShortestTime: %i", iShortestTime );
-#endif
 		
 		if( iShortestTime < 999999 )
 		{
