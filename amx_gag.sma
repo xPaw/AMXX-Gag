@@ -49,9 +49,12 @@ new const g_iTimeUnitMult[ TimeUnit ] =
 new Array:g_aGagTimes;
 new Array:g_aGagData;
 new Trie:g_tArrayPos;
+new Trie:g_tTimeUnitWords;
 
 new g_iGagged;
+new g_iThinker;
 new g_iTotalGagTimes;
+new g_iMsgSayText;
 
 new g_szAuthid[ MAX_PLAYERS + 1 ][ 35 ];
 new g_iMenuOption[ MAX_PLAYERS + 1 ];
@@ -61,16 +64,12 @@ new g_iMenuFlags[ MAX_PLAYERS + 1 ];
 
 new g_szGagFile[ 64 ];
 
-new bool:g_bColoredMenus;
-
-new g_iThinker;
+new bool:g_bColorSupported;
 
 new g_pCvarDefaultFlags;
 new g_pCvarDefaultTime;
 new g_pCvarTimeUnit;
 new g_pCvarMaxTime;
-
-new Trie:g_tTimeUnitWords;
 
 public plugin_init( )
 {
@@ -94,10 +93,11 @@ public plugin_init( )
 	g_pCvarTimeUnit     = register_cvar( "amx_gag_time_units",    "0"     );
 	g_pCvarMaxTime      = register_cvar( "amx_gag_max_time",      "86400" );
 	
-	g_tArrayPos = TrieCreate( );
-	g_aGagData  = ArrayCreate( GagData );
-	g_aGagTimes = ArrayCreate( );
-	g_bColoredMenus = bool:colored_menus( );
+	g_tArrayPos       = TrieCreate( );
+	g_aGagTimes       = ArrayCreate( );
+	g_aGagData        = ArrayCreate( GagData );
+	g_bColorSupported = bool:colored_menus( );
+	g_iMsgSayText     = get_user_msgid( "SayText" );
 	
 	// let words work with the time unit cvar
 	g_tTimeUnitWords = TrieCreate( );
@@ -230,7 +230,14 @@ public client_disconnect( id )
 			
 			if( get_user_flags( iPlayer ) & ADMIN_KICK )
 			{
-				client_print( iPlayer, print_chat, "[AMXX] Gagged player ^"%s<%s>^" has disconnected!", szName, g_szAuthid[ id ] );
+				if( g_bColorSupported )
+				{
+					GreenPrint( iPlayer, id, "^4[AMXX GAG]^1 Gagged player ^"^3%s^1<^4%s^1>^" has disconnected!", szName, g_szAuthid[ id ] );
+				}
+				else
+				{
+					client_print( iPlayer, print_chat, "[AMXX GAG] Gagged player ^"%s<%s>^" has disconnected!", szName, g_szAuthid[ id ] );
+				}
 			}
 		}
 	}
@@ -253,7 +260,14 @@ public client_infochanged( id )
 	
 	if( !equal( szNewName, szOldName ) )
 	{
-		client_print( id, print_chat, "[AMXX] Gagged players cannot change their names!" );
+		if( g_bColorSupported )
+		{
+			GreenPrint( id, id, "^4[AMXX GAG]^1 Gagged players cannot change their names!" );
+		}
+		else
+		{
+			client_print( id, print_chat, "[AMXX GAG] Gagged players cannot change their names!" );
+		}
 		
 		set_user_info( id, name, szOldName );
 	}
@@ -311,7 +325,25 @@ public FwdThink( const iEntity )
 			{
 				get_user_name( id, szName, 31 );
 				
-				client_print( 0, print_chat, "[AMXX] Player ^"%s^" is no longer gagged.", szName );
+				if( g_bColorSupported )
+				{
+					GreenPrint( 0, id, "^4[AMXX GAG]^1 Player ^"^3%s^1^" is no longer gagged", szName );
+				}
+				else
+				{
+					client_print( 0, print_chat, "[AMXX GAG] Player ^"%s^" is no longer gagged", szName );
+				}
+			}
+			else
+			{
+				if( g_bColorSupported )
+				{
+					GreenPrint( 0, 1, "^4[AMXX GAG]^1 SteamID ^"^3%s^1^" is no longer gagged", data[ GAG_AUTHID ] );
+				}
+				else
+				{
+					client_print( 0, print_chat, "[AMXX GAG] SteamID ^"%s^" is no longer gagged", data[ GAG_AUTHID ] );
+				}
 			}
 			
 			DeleteGag( i-- );
@@ -365,10 +397,26 @@ CheckSay( const id, const bTeam )
 				
 				GetTimeLength( iTime, szInfo, charsmax( szInfo ) );
 				
-				client_print( id, print_chat, "[AMXX] %s left before your ungag!", szInfo );
+				if( g_bColorSupported )
+				{
+					GreenPrint( id, id, "^4[AMXX GAG]^3 %s^1 left before your ungag!", szInfo );
+				}
+				else
+				{
+					client_print( id, print_chat, "[AMXX GAG] %s left before your ungag!", szInfo );
+				}
 			}
 			else
-				client_print( id, print_chat, "[AMXX] You are gagged permanently!" );
+			{
+				if( g_bColorSupported )
+				{
+					GreenPrint( id, id, "^4[AMXX GAG]^3 You are gagged permanently!" );
+				}
+				else
+				{
+					client_print( id, print_chat, "[AMXX GAG] You are gagged permanently!" );
+				}
+			}
 			
 			client_print( id, print_center, "** You are gagged from%s chat! **", bTeam ? " team" : "" );
 			
@@ -792,7 +840,7 @@ DisplayGagMenu( const id, iPosition )
 		iStart = iPosition = g_iMenuPosition[ id ] = 0;
 	
 	new iEnd = iStart + PERPAGE, iKeys = MENU_KEY_0 | MENU_KEY_8;
-	new iLen = formatex( szMenu, 511, g_bColoredMenus ? "\rGag Menu\R%i/%i^n^n" : "Gag Menu %i/%i^n^n", iPosition + 1, ( ( iNum + PERPAGE - 1 ) / PERPAGE ) );
+	new iLen = formatex( szMenu, 511, g_bColorSupported ? "\rGag Menu\R%i/%i^n^n" : "Gag Menu %i/%i^n^n", iPosition + 1, ( ( iNum + PERPAGE - 1 ) / PERPAGE ) );
 	
 	new bool:bUngag = bool:!g_iMenuOption[ id ];
 	
@@ -808,7 +856,7 @@ DisplayGagMenu( const id, iPosition )
 		{
 			++iCount;
 			
-			if( g_bColoredMenus )
+			if( g_bColorSupported )
 				iLen += formatex( szMenu[ iLen ], 511 - iLen, "\d%i. %s^n", iCount, szName );
 			else
 				iLen += formatex( szMenu[ iLen ], 511 - iLen, "#. %s^n", szName );
@@ -818,7 +866,7 @@ DisplayGagMenu( const id, iPosition )
 			iKeys |= ( 1 << iCount );
 			++iCount;
 			
-			iLen += formatex( szMenu[ iLen ], 511 - iLen, g_bColoredMenus ? "\r%i.\w %s\y%s\r%s^n" : "%i. %s%s%s^n", iCount, szName, TrieKeyExists( g_tArrayPos, g_szAuthid[ iPlayer ] ) ? " GAGGED" : "", ( ~iFlags & ADMIN_USER ? " *" : "" ) );
+			iLen += formatex( szMenu[ iLen ], 511 - iLen, g_bColorSupported ? "\r%i.\w %s\y%s\r%s^n" : "%i. %s%s%s^n", iCount, szName, TrieKeyExists( g_tArrayPos, g_szAuthid[ iPlayer ] ) ? " GAGGED" : "", ( ~iFlags & ADMIN_USER ? " *" : "" ) );
 		}
 	}
 	
@@ -827,7 +875,7 @@ DisplayGagMenu( const id, iPosition )
 	new szFlags[ 4 ];
 	get_flags( g_iMenuFlags[ id ], szFlags, 3 );
 	
-	iLen += formatex( szMenu[ iLen ], 511 - iLen, g_bColoredMenus ? ( bUngag ? "^n\d7. Flags: %s" : "^n\r7.\y Flags:\w %s" ) : ( bUngag ? "^n#. Flags: %s" : "^n7. Flags: %s" ), szFlags );
+	iLen += formatex( szMenu[ iLen ], 511 - iLen, g_bColorSupported ? ( bUngag ? "^n\d7. Flags: %s" : "^n\r7.\y Flags:\w %s" ) : ( bUngag ? "^n#. Flags: %s" : "^n7. Flags: %s" ), szFlags );
 	
 	if( !bUngag )
 	{
@@ -840,21 +888,21 @@ DisplayGagMenu( const id, iPosition )
 			new szTime[ 128 ];
 			GetTimeLength( iGagTime * g_iTimeUnitMult[ GetTimeUnit( ) ], szTime, charsmax( szTime ) );
 			
-			iLen += formatex( szMenu[ iLen ], 511 - iLen, g_bColoredMenus ? "^n\r8.\y Time:\w %s^n" : "^n8. Time: %s^n", szTime );
+			iLen += formatex( szMenu[ iLen ], 511 - iLen, g_bColorSupported ? "^n\r8.\y Time:\w %s^n" : "^n8. Time: %s^n", szTime );
 		}
 		else
-			iLen += copy( szMenu[ iLen ], 511 - iLen, g_bColoredMenus ? "^n\r8.\y Time: Permanent^n" : "^n8. Time: Permanent^n" );
+			iLen += copy( szMenu[ iLen ], 511 - iLen, g_bColorSupported ? "^n\r8.\y Time: Permanent^n" : "^n8. Time: Permanent^n" );
 	}
 	else
-		iLen += copy( szMenu[ iLen ], 511 - iLen, g_bColoredMenus ? "^n\r8.\w Ungag^n" : "^n8. Ungag^n" );
+		iLen += copy( szMenu[ iLen ], 511 - iLen, g_bColorSupported ? "^n\r8.\w Ungag^n" : "^n8. Ungag^n" );
 	
 	if( iEnd != iNum )
 	{
-		formatex( szMenu[ iLen ], 511 - iLen, g_bColoredMenus ? "^n\r9.\w More...^n\r0.\w %s" : "^n9. More...^n0. %s", iPosition ? "Back" : "Exit" );
+		formatex( szMenu[ iLen ], 511 - iLen, g_bColorSupported ? "^n\r9.\w More...^n\r0.\w %s" : "^n9. More...^n0. %s", iPosition ? "Back" : "Exit" );
 		iKeys |= MENU_KEY_9;
 	}
 	else
-		formatex( szMenu[ iLen ], 511 - iLen, g_bColoredMenus ? "^n\r0.\w %s" : "^n0. %s", iPosition ? "Back" : "Exit" );
+		formatex( szMenu[ iLen ], 511 - iLen, g_bColorSupported ? "^n\r0.\w %s" : "^n0. %s", iPosition ? "Back" : "Exit" );
 	
 	show_menu( id, iKeys, szMenu, -1, "Gag Menu" );
 }
@@ -876,9 +924,9 @@ public ActionGagFlags( const id, const iKey )
 DisplayGagFlags( const id )
 {
 	new szMenu[ 512 ];
-	new iLen = copy( szMenu, 511, g_bColoredMenus ? "\rGag Flags^n^n" : "Gag Flags^n^n" );
+	new iLen = copy( szMenu, 511, g_bColorSupported ? "\rGag Flags^n^n" : "Gag Flags^n^n" );
 	
-	if( g_bColoredMenus )
+	if( g_bColorSupported )
 	{
 		iLen += formatex( szMenu[ iLen ], 511 - iLen, "\r1.\w Chat: %s^n", ( g_iMenuFlags[ id ] & GAG_CHAT ) ? "\yYES" : "\rNO" );
 		iLen += formatex( szMenu[ iLen ], 511 - iLen, "\r2.\w TeamSay: %s^n", ( g_iMenuFlags[ id ] & GAG_TEAMSAY ) ? "\yYES" : "\rNO" );
@@ -891,7 +939,7 @@ DisplayGagFlags( const id )
 		iLen += formatex( szMenu[ iLen ], 511 - iLen, "3. Voice: %s^n", ( g_iMenuFlags[ id ] & GAG_VOICE ) ? "YES" : "NO" );
 	}
 	
-	copy( szMenu[ iLen ], 511 - iLen, g_bColoredMenus ? "^n\r0. \wBack to Gag Menu" : "^n0. Back to Gag Menu" );
+	copy( szMenu[ iLen ], 511 - iLen, g_bColorSupported ? "^n\r0. \wBack to Gag Menu" : "^n0. Back to Gag Menu" );
 	
 	show_menu( id, ( MENU_KEY_1 | MENU_KEY_2 | MENU_KEY_3 | MENU_KEY_0 ), szMenu, -1, "Gag Flags" );
 }
@@ -1093,4 +1141,15 @@ GetTimeLength( iTime, szOutput[ ], iOutputLen )
 	}
 	
 	return iLen
+}
+
+GreenPrint( const id, const iSender, const szRawMessage[ ], any:... )
+{
+	new szMessage[ 192 ];
+	vformat( szMessage, charsmax( szMessage ), szRawMessage, 4 );
+	
+	message_begin( id ? MSG_ONE_UNRELIABLE : MSG_BROADCAST, g_iMsgSayText, _, id );
+	write_byte( iSender );
+	write_string( szMessage );
+	message_end( );
 }
