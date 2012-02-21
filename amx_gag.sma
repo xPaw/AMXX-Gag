@@ -86,7 +86,7 @@ new g_iReturnFromRegex;
 
 public plugin_init( )
 {
-	register_plugin( "AMXX Gag", "1.4.5b", "xPaw & Exolent" );
+	register_plugin( "AMXX Gag", "1.4.6", "xPaw & Exolent" );
 	
 	register_clcmd( "say",        "CmdSay" );
 	register_clcmd( "say_team",   "CmdTeamSay" );
