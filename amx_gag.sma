@@ -781,7 +781,7 @@ public CmdUnGagPlayer( const id, const iLevel, const iCid )
 		return PLUGIN_HANDLED;
 	}
 	
-	new iPlayer = cmd_target( id, szArg, CMDTARGET_OBEY_IMMUNITY | CMDTARGET_NO_BOTS );
+	new iPlayer = cmd_target( id, szArg, CMDTARGET_NO_BOTS );
 	new iArrayPos, szName[ 32 ];
 	
 	if( !iPlayer )
