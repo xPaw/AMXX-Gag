@@ -648,6 +648,12 @@ public CmdAddGag( const id, const iLevel, const iCid )
 		return PLUGIN_HANDLED;
 	}
 	
+	if( GetAccessBySteamID( szArg ) & ADMIN_IMMUNITY )
+	{
+		console_print( id, "This user has immunity!" );
+		return PLUGIN_HANDLED;
+	}
+	
 	new data[ GagData ];
 	copy( data[ GAG_AUTHID ], 34, szArg );
 	
@@ -1218,6 +1224,27 @@ GreenPrint( id, iSender, const szRawMessage[ ], any:... )
 	write_byte( iSender );
 	write_string( szMessage );
 	message_end( );
+}
+
+GetAccessBySteamID( const szSteamID[ ] )
+{
+	new szAuthData[ 44 ], iIndex = -1, iCount = admins_num( );
+	
+	for( new i; i < iCount; i++ )
+	{
+		if( admins_lookup( i, AdminProp_Flags ) & FLAG_AUTHID )
+		{
+			admins_lookup( i, AdminProp_Auth, szAuthData, charsmax( szAuthData ) );
+			
+			if( equal( szAuthData, szSteamID ) )
+			{
+				iIndex = i;
+				break;
+			}
+		}
+	}
+	
+	return iIndex == -1 ? -1 : get_flags( admins_lookup( iIndex, AdminProp_Access ), szAuthData, charsmax( szAuthData ) );
 }
 
 LoadWhiteLists( )
