@@ -1244,7 +1244,7 @@ GetAccessBySteamID( const szSteamID[ ] )
 		}
 	}
 	
-	return iIndex == -1 ? -1 : get_flags( admins_lookup( iIndex, AdminProp_Access ), szAuthData, charsmax( szAuthData ) );
+	return iIndex == -1 ? -1 : admins_lookup( iIndex, AdminProp_Access );
 }
 
 LoadWhiteLists( )
