@@ -1,7 +1,6 @@
 #include < amxmodx >
 #include < amxmisc >
 #include < engine >
-#include < regex >
 
 #define MAX_PLAYERS 32
 
@@ -74,19 +73,9 @@ new g_pCvarDefaultTime;
 new g_pCvarTimeUnit;
 new g_pCvarMaxTime;
 
-enum _:WhiteListData
-{
-	WHITELIST_PATTERN,
-	WHITELIST_SAYAREA
-};
-
-new Array:g_aWhiteLists;
-new g_iNumWhiteLists;
-new g_iReturnFromRegex;
-
 public plugin_init( )
 {
-	register_plugin( "AMXX Gag", "1.4.6", "xPaw & Exolent" );
+	register_plugin( "AMXX Gag", "1.4.7", "xPaw & Exolent" );
 	
 	register_clcmd( "say",        "CmdSay" );
 	register_clcmd( "say_team",   "CmdTeamSay" );
@@ -152,11 +141,6 @@ public plugin_init( )
 	add( g_szGagFile, charsmax( g_szGagFile ), "/gags.txt" );
 	
 	LoadFromFile( );
-	
-	// prepare for white listing
-	g_aWhiteLists = ArrayCreate( WhiteListData );
-	
-	LoadWhiteLists( );
 }
 
 public plugin_end( )
@@ -165,20 +149,6 @@ public plugin_end( )
 	ArrayDestroy( g_aGagData );
 	ArrayDestroy( g_aGagTimes );
 	TrieDestroy( g_tTimeUnitWords );
-	
-	if( g_iNumWhiteLists )
-	{
-		new data[ WhiteListData ];
-		
-		for( new i = 0; i < g_iNumWhiteLists; i++ )
-		{
-			ArrayGetArray( g_aWhiteLists, i, data );
-			
-			regex_free( Regex:data[ WHITELIST_PATTERN ] );
-		}
-	}
-	
-	ArrayDestroy( g_aWhiteLists );
 }
 
 public CmdSetBanTimes( )
@@ -423,30 +393,6 @@ CheckSay( const id, const bTeam )
 		
 		if( data[ GAG_FLAGS ] & iFlags[ bTeam ] )
 		{
-			// player is gagged, check if they were allowed to say what they said
-			if( g_iNumWhiteLists )
-			{
-				new szSaid[ 194 ];
-				read_args( szSaid, charsmax( szSaid ) );
-				remove_quotes( szSaid );
-				
-				new whiteList[ WhiteListData ], iSayFlag = ( 1 << bTeam );
-				
-				for( new i = 0; i < g_iNumWhiteLists; i++ )
-				{
-					ArrayGetArray( g_aWhiteLists, i, whiteList );
-					
-					if( whiteList[ WHITELIST_SAYAREA ] & iSayFlag
-					&& regex_match_c( szSaid, Regex:whiteList[ WHITELIST_PATTERN ], g_iReturnFromRegex ) > 0 )
-					{
-						// player was allowed to say this
-						// don't say they were gagged
-						// but still hide this from chat
-						return PLUGIN_HANDLED_MAIN;
-					}
-				}
-			}
-			
 			if( data[ GAG_TIME ] > 0 )
 			{
 				new szInfo[ 128 ], iTime = data[ GAG_START ] + data[ GAG_TIME ] - get_systime( );
@@ -622,9 +568,7 @@ public CmdAddGag( const id, const iLevel, const iCid )
 	new szArg[ 32 ];
 	read_argv( 1, szArg, 31 );
 	
-	// regular expression for a simple check? meh.
-	
-	if( szArg[ 9 ] != ':' || !( '0' <= szArg[ 8 ] <= '1' ) || !is_str_num( szArg[ 10 ] ) || !equal( szArg, "STEAM_0:", 8 ) )
+	if( !IsValidSteamID( szArg ) )
 	{
 		console_print( id, "Invalid SteamID provided (%s). Must be in ^"STEAM_0:X:XXXXX^" format (remember to use quotes!)", szArg );
 		return PLUGIN_HANDLED;
@@ -794,7 +738,7 @@ public CmdUnGagPlayer( const id, const iLevel, const iCid )
 	{
 		// Maybe it's a steamid
 		
-		if( szArg[ 9 ] != ':' || !( '0' <= szArg[ 8 ] <= '1' ) || !is_str_num( szArg[ 10 ] ) || !equal( szArg, "STEAM_0:", 8 ) )
+		if( !IsValidSteamID( szArg ) )
 		{
 			return PLUGIN_HANDLED;
 		}
@@ -1226,9 +1170,22 @@ GreenPrint( id, iSender, const szRawMessage[ ], any:... )
 	message_end( );
 }
 
+bool:IsValidSteamID( const szSteamID[ ] )
+{
+	// STEAM_0:(0|1):\d+
+	// 012345678    90
+	
+	// 0-7 = STEAM_0:
+	// 8 = 0 or 1
+	// 9 = :
+	// 10+ = integer
+	
+	return ( ( '0' <= szSteamID[ 8 ] <= '1' ) && szSteamID[ 9 ] == ':' && equal( szSteamID, "STEAM_0:", 8 ) && is_str_num( szSteamID[ 10 ] ) );
+}
+
 GetAccessBySteamID( const szSteamID[ ] )
 {
-	new szAuthData[ 44 ], iIndex = -1, iCount = admins_num( );
+	new szAuthData[ 44 ], iCount = admins_num( );
 	
 	for( new i; i < iCount; i++ )
 	{
@@ -1238,118 +1195,10 @@ GetAccessBySteamID( const szSteamID[ ] )
 			
 			if( equal( szAuthData, szSteamID ) )
 			{
-				iIndex = i;
-				break;
+				return admins_lookup( i, AdminProp_Access );
 			}
 		}
 	}
 	
-	return iIndex == -1 ? -1 : admins_lookup( iIndex, AdminProp_Access );
-}
-
-LoadWhiteLists( )
-{
-	new szFileName[ 64 ];
-	get_configsdir( szFileName, charsmax( szFileName ) );
-	add( szFileName, charsmax( szFileName ), "/gag_white_list.ini" );
-	
-	new hFile = fopen( szFileName, "rt" );
-	
-	if( hFile )
-	{
-		// Pattern for patterns:
-		// /pattern here/flags
-		// /pattern here/flags "normal"
-		// /pattern here/flags "team"
-		// /pattern here/flags "both"
-		// /pattern here/flags "all"
-		new szError[ 128 ];
-		new Regex:pPatternForPatterns = regex_compile("^^\/.+\/[imsx]*(\s+(^"(normal|team|both|all)^"|(normal|team|both|all)))?$", g_iReturnFromRegex, szError, charsmax( szError ), "i");
-		
-		if( pPatternForPatterns < REGEX_OK )
-		{
-			log_amx( "Failed to create pattern for finding patterns: (%d) %s", g_iReturnFromRegex, szError );
-			
-			fclose( hFile );
-			
-			return;
-		}
-		
-		new szData[ 64 + MAX_PATTERN_LEN ], iLen;
-		new szPattern[ MAX_PATTERN_LEN + 1 ], szFlags[ 5 ];
-		new Regex:pPattern, iSayArea;
-		new data[ WhiteListData ];
-		
-		while( !feof( hFile ) )
-		{
-			iLen = fgets( hFile, szData, charsmax( szData ) ) - trim( szData );
-			
-			if( !szData[ 0 ] || szData[ 0 ] == ';'
-			|| szData[ 0 ] == '/' && szData[ 1 ] == '/'
-			|| regex_match_c( szData, pPatternForPatterns, g_iReturnFromRegex ) <= 0 )
-			{
-				continue;
-			}
-			
-			// set it to have both normal and team say
-			iSayArea = 0b11;
-			
-			while( --iLen >= 0 )
-			{
-				// found pattern before specific say area
-				// assume we're checking in both
-				if( szData[ iLen ] == '/' )
-				{
-					break;
-				}
-				
-				// found the space, so figure out what say area we're checking
-				if( szData[ iLen ] == ' ' )
-				{
-					if( containi( szData[ iLen ], "normal" ) > 0 )
-					{
-						// set to normal say
-						iSayArea = 0b01;
-					}
-					else if( containi( szData[ iLen ], "team" ) > 0 )
-					{
-						// set to team say
-						iSayArea = 0b10;
-					}
-					
-					szData[ iLen ] = 0;
-					
-					iLen -= trim( szData );
-					
-					break;
-				}
-			}
-			
-			// find the flags for the pattern
-			while( iLen > 0 && szData[ --iLen ] != '/' ) { }
-			iLen++;
-			
-			copy( szPattern, iLen, szData );
-			copy( szFlags, charsmax( szFlags ), szData[ iLen ] );
-			strtolower( szFlags );
-			
-			pPattern = regex_compile( szPattern, g_iReturnFromRegex, szError, charsmax( szError ), szFlags );
-			
-			if( pPattern < REGEX_OK )
-			{
-				log_amx( "Failed to create pattern ^"%s^": (%d) %s", szPattern, g_iReturnFromRegex, szError );
-				continue;
-			}
-			
-			data[ WHITELIST_PATTERN ] = _:pPattern;
-			data[ WHITELIST_SAYAREA ] = iSayArea;
-			
-			ArrayPushArray( g_aWhiteLists, data );
-			g_iNumWhiteLists++;
-		}
-		
-		regex_free( pPatternForPatterns );
-		
-		fclose( hFile );
-	}
+	return 0;
 }
