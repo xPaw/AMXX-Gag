@@ -1,6 +1,7 @@
 #include < amxmodx >
 #include < amxmisc >
 #include < engine >
+#include < sqlx >
 
 #define MAX_PLAYERS 32
 
@@ -48,6 +49,9 @@ new const g_iTimeUnitMult[ TimeUnit ] =
 	604800
 };
 
+new const DATETIME_FORMAT[ ] = "%Y-%m-%d %H:%M:%S";
+const DATE_SIZE = 20;
+
 new Array:g_aGagTimes;
 new Array:g_aGagData;
 new Trie:g_tArrayPos;
@@ -72,10 +76,18 @@ new g_pCvarDefaultFlags;
 new g_pCvarDefaultTime;
 new g_pCvarTimeUnit;
 new g_pCvarMaxTime;
+new g_pCvarSQL;
+new g_pCvarSQLHost;
+new g_pCvarSQLUser;
+new g_pCvarSQLPass;
+new g_pCvarSQLDb;
+
+new bool:g_bUsingSQL = false;
+new Handle:g_hSqlTuple;
 
 public plugin_init( )
 {
-	register_plugin( "AMXX Gag", "1.4.7", "xPaw & Exolent" );
+	register_plugin( "AMXX Gag", "1.4.8", "xPaw & Exolent" );
 	
 	register_clcmd( "say",        "CmdSay" );
 	register_clcmd( "say_team",   "CmdTeamSay" );
@@ -94,6 +106,11 @@ public plugin_init( )
 	g_pCvarDefaultTime  = register_cvar( "amx_gag_default_time",  "600"   );
 	g_pCvarTimeUnit     = register_cvar( "amx_gag_time_units",    "0"     );
 	g_pCvarMaxTime      = register_cvar( "amx_gag_max_time",      "86400" );
+	g_pCvarSQL          = register_cvar( "amx_gag_sql",           "0"     );
+	g_pCvarSQLHost      = register_cvar( "amx_gag_sql_host",      ""      );
+	g_pCvarSQLUser      = register_cvar( "amx_gag_sql_user",      ""      );
+	g_pCvarSQLPass      = register_cvar( "amx_gag_sql_pass",      ""      );
+	g_pCvarSQLDb        = register_cvar( "amx_gag_sql_db",        ""      );
 	
 	g_tArrayPos       = TrieCreate( );
 	g_aGagTimes       = ArrayCreate( );
@@ -115,18 +132,15 @@ public plugin_init( )
 	
 	// Gag times for the gag menu (amx_gagmenu)
 	// Default values: 60 300 600 1800 3600 7200 86400
+	new const iDefaultTimes[ ] = { 60, 300, 600, 1800, 3600, 7200, 86400, 0 };
 	
 	// Load up standart times
-	ArrayPushCell( g_aGagTimes, 60 );
-	ArrayPushCell( g_aGagTimes, 300 );
-	ArrayPushCell( g_aGagTimes, 600 );
-	ArrayPushCell( g_aGagTimes, 1800 );
-	ArrayPushCell( g_aGagTimes, 3600 );
-	ArrayPushCell( g_aGagTimes, 7200 );
-	ArrayPushCell( g_aGagTimes, 86400 );
-	ArrayPushCell( g_aGagTimes, 0 ); // 0 = permanent
+	for( new i = 0; i < sizeof( iDefaultTimes ); i++ )
+	{
+		ArrayPushCell( g_aGagTimes, iDefaultTimes[ i ] );
+	}
 	
-	g_iTotalGagTimes = ArraySize( g_aGagTimes );
+	g_iTotalGagTimes = sizeof( iDefaultTimes ) + 1;
 	
 	// Set up entity-thinker
 	new const szClassName[ ] = "gag_thinker";
@@ -140,7 +154,127 @@ public plugin_init( )
 	get_datadir( g_szGagFile, charsmax( g_szGagFile ) );
 	add( g_szGagFile, charsmax( g_szGagFile ), "/gags.txt" );
 	
-	LoadFromFile( );
+	// set server's SteamID to "SERVER"
+	copy( g_szAuthid[ 0 ], charsmax( g_szAuthid[ ] ), "SERVER" );
+}
+
+public plugin_cfg( )
+{
+	// check SQL
+	InitSQL( );
+	
+	if( !g_bUsingSQL )
+	{
+		// if no SQL, load file
+		LoadFromFile( );
+	}
+}
+
+InitSQL( )
+{
+	// init SQL after configs were executed
+	if( get_pcvar_num( g_pCvarSQL ) )
+	{
+		new szHost[ 64 ], szUser[ 64 ], szPass[ 64 ], szDb[ 64 ];
+		get_pcvar_string( g_pCvarSQLHost, szHost, charsmax( szHost ) );
+		get_pcvar_string( g_pCvarSQLUser, szUser, charsmax( szUser ) );
+		get_pcvar_string( g_pCvarSQLPass, szPass, charsmax( szPass ) );
+		get_pcvar_string( g_pCvarSQLDb,   szDb,   charsmax( szDb   ) );
+		
+		g_hSqlTuple = SQL_MakeDbTuple( szHost, szUser, szPass, szDb );
+		
+		if( g_hSqlTuple == Empty_Handle ) return;
+		
+		// TABLE STRUCTURE
+		// admin_name VARCHAR(32) NOT NULL
+		// admin_steamid VARCHAR(35) NOT NULL
+		// admin_ip VARCHAR(15) NOT NULL
+		// player_name VARCHAR(32) NOT NULL
+		// player_steamid VARCHAR(35) NOT NULL PRIMARY KEY
+		// player_ip VARCHAR(15) NOT NULL
+		// date_gagged DATETIME NOT NULL
+		// date_ungag DATETIME NOT NULL
+		// gag_seconds INT NOT NULL
+		// gag_flags VARCHAR(3) NOT NULL
+		
+		new iError, szError[ 128 ];
+		new Handle:hDb = SQL_Connect( g_hSqlTuple, iError, szError, charsmax( szError ) );
+		
+		if( hDb == Empty_Handle )
+		{
+			log_amx( "Failed to connect to database: (%d) %s", iError, szError );
+			return;
+		}
+		
+		new Handle:hQuery = SQL_PrepareQuery( hDb, "CREATE TABLE IF NOT EXISTS gagged_players (\
+			admin_name VARCHAR(32) NOT NULL,\
+			admin_steamid VARCHAR(35) NOT NULL,\
+			admin_ip VARCHAR(15) NOT NULL,\
+			player_name VARCHAR(32) NOT NULL,\
+			player_steamid VARCHAR(35) NOT NULL PRIMARY KEY,\
+			player_ip VARCHAR(15) NOT NULL,\
+			date_gagged DATETIME NOT NULL,\
+			date_ungag DATETIME NOT NULL,\
+			gag_seconds INT NOT NULL,\
+			gag_flags VARCHAR(3) NOT NULL);" );
+		
+		if( !SQL_Execute( hQuery ) )
+		{
+			SQL_QueryError( hQuery, szError, charsmax( szError ) );
+			log_amx( "Failed create table query: %s", szError );
+		}
+		else
+		{
+			SQL_FreeHandle( hQuery );
+			
+			new szDate[ DATE_SIZE ];
+			get_time( DATETIME_FORMAT, szDate, charsmax( szDate ) );
+			
+			// load all users
+			hQuery = SQL_PrepareQuery( hDb, "SELECT * FROM gagged_players WHERE date_ungag > '%s';", szDate );
+			
+			if( !SQL_Execute( hQuery ) )
+			{
+				SQL_QueryError( hQuery, szError, charsmax( szError ) );
+				log_amx( "Failed load gags query: %s", szError );
+			}
+			else
+			{
+				g_bUsingSQL = true;
+				
+				if( SQL_NumResults( hQuery ) )
+				{
+					new data[ GagData ];
+					new szFlags[ 4 ];
+					
+					new iFieldSteamID = SQL_FieldNameToNum( hQuery, "player_steamid" );
+					new iFieldDateGagged = SQL_FieldNameToNum( hQuery, "date_gagged" );
+					new iFieldGagTime = SQL_FieldNameToNum( hQuery, "gag_seconds" );
+					new iFieldGagFlags = SQL_FieldNameToNum( hQuery, "gag_flags" );
+					
+					while( SQL_MoreResults( hQuery ) )
+					{
+						SQL_ReadResult( hQuery, iFieldSteamID, data[ GAG_AUTHID ], charsmax( data[ GAG_AUTHID ] ) );
+						SQL_ReadResult( hQuery, iFieldDateGagged, szDate, charsmax( szDate ) );
+						data[ GAG_TIME ] = SQL_ReadResult( hQuery, iFieldGagTime );
+						SQL_ReadResult( hQuery, iFieldGagFlags, szFlags, charsmax( szFlags ) );
+						
+						data[ GAG_START ] = strtotime( szDate );
+						data[ GAG_FLAGS ] = read_flags( szFlags );
+						
+						ArrayPushArray( g_aGagData, data );
+						TrieSetCell( g_tArrayPos, data[ GAG_AUTHID ], g_iGagged );
+						g_iGagged++;
+						
+						SQL_NextRow( hQuery );
+					}
+				}
+			}
+		}
+		
+		SQL_FreeHandle( hQuery );
+		SQL_FreeHandle( hDb );
+	}
 }
 
 public plugin_end( )
@@ -165,6 +299,7 @@ public CmdSetBanTimes( )
 	
 	// this is used for ungag in the menu
 	ArrayPushCell( g_aGagTimes, 0 );
+	g_iTotalGagTimes = 1;
 	
 	// get max time allowed
 	new iTimeLimit = get_pcvar_num( g_pCvarMaxTime );
@@ -195,9 +330,8 @@ public CmdSetBanTimes( )
 		}
 		
 		ArrayPushCell( g_aGagTimes, iTime );
+		g_iTotalGagTimes++;
 	}
-	
-	g_iTotalGagTimes = ArraySize( g_aGagTimes );
 	
 	return PLUGIN_HANDLED;
 }
@@ -314,6 +448,15 @@ public FwdThink( const iEntity )
 	new iSystime = get_systime( );
 	new bool:bRemovedGags = false;
 	
+	new bool:bUsingSQL = g_bUsingSQL;
+	new Array:aRemoveSteamIDs, iNumRemoveSteamIDs;
+	
+	if( bUsingSQL )
+	{
+		aRemoveSteamIDs = ArrayCreate( 35 );
+		g_bUsingSQL = false;
+	}
+	
 	new data[ GagData ], id, szName[ 32 ];
 	for( new i = 0; i < g_iGagged; i++ )
 	{
@@ -351,12 +494,45 @@ public FwdThink( const iEntity )
 			DeleteGag( i-- );
 			
 			bRemovedGags = true;
+			
+			if( bUsingSQL )
+			{
+				ArrayPushString( aRemoveSteamIDs, data[ GAG_AUTHID ] );
+				iNumRemoveSteamIDs++;
+			}
 		}
 	}
 	
-	if( bRemovedGags )
+	if( !bUsingSQL )
 	{
-		SaveToFile( );
+		if( bRemovedGags )
+		{
+			SaveToFile( );
+		}
+	}
+	else
+	{
+		if( iNumRemoveSteamIDs )
+		{
+			static szQuery[ 1024 ];
+			new iLen = copy( szQuery, charsmax( szQuery ), "DELETE FROM gagged_players WHERE " );
+			
+			for( new i = 0; i < iNumRemoveSteamIDs; i++ )
+			{
+				ArrayGetString( aRemoveSteamIDs, i, data[ GAG_AUTHID ], charsmax( data[ GAG_AUTHID ] ) );
+				
+				iLen += formatex( szQuery[ iLen ], charsmax( szQuery ) - iLen, "%splayer_steamid = ^"%s^"", i ? " OR " : "", data[ GAG_AUTHID ] );
+			}
+			
+			szQuery[ iLen++ ] = ';';
+			szQuery[ iLen ] = 0;
+			
+			SQL_ThreadQuery( g_hSqlTuple, "QueryDeleteMultiple", szQuery );
+		}
+		
+		ArrayDestroy( aRemoveSteamIDs );
+		
+		g_bUsingSQL = true;
 	}
 	
 	if( !g_iGagged )
@@ -373,6 +549,15 @@ public FwdThink( const iEntity )
 	
 	if( iNextTime < 999999 )
 		entity_set_float( iEntity, EV_FL_nextthink, get_gametime( ) + iNextTime );
+}
+
+public QueryDeleteMultiple( iFailState, Handle:hQuery, szError[ ], iError, iData[ ], iDataSize, Float:flQueueTime )
+{
+	switch( iFailState )
+	{
+		case TQUERY_CONNECT_FAILED: log_amx( "Failed to connect to database: (%d) %s", iError, szError );
+		case TQUERY_QUERY_FAILED:   log_amx( "Failed delete multiple query: (%d) %s", iError, szError );
+	}
 }
 
 public CmdSay( const id )
@@ -533,10 +718,18 @@ public CmdGagPlayer( const id, const iLevel, const iCid )
 			entity_set_float( g_iThinker, EV_FL_nextthink, flGametime + iGagTime );
 	}
 	
-	SaveToFile( );
 	
 	new szInfo[ 32 ], szAdmin[ 20 ];
 	get_user_name( id, szAdmin, 19 );
+	
+	if( g_bUsingSQL )
+	{
+		AddGag( id, iPlayer, iGagTime, iFlags );
+	}
+	else
+	{
+		SaveToFile( );
+	}
 	
 	if( iGagTime > 0 )
 	{
@@ -674,7 +867,14 @@ public CmdAddGag( const id, const iLevel, const iCid )
 			entity_set_float( g_iThinker, EV_FL_nextthink, flGametime + iGagTime );
 	}
 	
-	SaveToFile( );
+	if( g_bUsingSQL )
+	{
+		AddGag( id, iPlayer, iGagTime, iFlags );
+	}
+	else
+	{
+		SaveToFile( );
+	}
 	
 	new szInfo[ 32 ], szAdmin[ 20 ];
 	get_user_name( id, szAdmin, 19 );
@@ -714,7 +914,7 @@ public CmdUnGagPlayer( const id, const iLevel, const iCid )
 			return PLUGIN_HANDLED;
 		}
 		
-		while( g_iGagged ) DeleteGag( 0 ); // Excellent by Exolent
+		DeleteAllGags( );
 		
 		if( entity_get_float( g_iThinker, EV_FL_nextthink ) > 0.0 )
 			entity_set_float( g_iThinker, EV_FL_nextthink, 0.0 );
@@ -764,7 +964,10 @@ public CmdUnGagPlayer( const id, const iLevel, const iCid )
 	
 	DeleteGag( iArrayPos );
 	
-	SaveToFile( );
+	if( !g_bUsingSQL )
+	{
+		SaveToFile( );
+	}
 	
 	new szAdmin[ 32 ];
 	get_user_name( id, szAdmin, 31 );
@@ -965,6 +1168,39 @@ CheckGagFlag( const id, const iFlag )
 	return 0;
 }
 
+DeleteAllGags( )
+{
+	new data[ GagData ];
+	new iPlayer;
+	
+	for( new i = 0; i < g_iGagged; i++ )
+	{
+		ArrayGetArray( g_aGagData, i, data );
+		
+		iPlayer = find_player( "c", data[ GAG_AUTHID ] );
+		if( is_user_connected( iPlayer ) )
+			set_speak( iPlayer, SPEAK_NORMAL );
+	}
+	
+	ArrayClear( g_aGagData );
+	TrieClear( g_tArrayPos );
+	g_iGagged = 0;
+	
+	if( g_bUsingSQL )
+	{
+		SQL_ThreadQuery( g_hSqlTuple, "QueryDeleteAll", "DELETE FROM gagged_players;" );
+	}
+}
+
+public QueryDeleteAll( iFailState, Handle:hQuery, szError[ ], iError, iData[ ], iDataSize, Float:flQueueTime )
+{
+	switch( iFailState )
+	{
+		case TQUERY_CONNECT_FAILED: log_amx( "Failed to connect to database: (%d) %s", iError, szError );
+		case TQUERY_QUERY_FAILED:   log_amx( "Failed delete all query: (%d) %s", iError, szError );
+	}
+}
+
 DeleteGag( const iArrayPos )
 {
 	new data[ GagData ];
@@ -985,6 +1221,23 @@ DeleteGag( const iArrayPos )
 	{
 		ArrayGetArray( g_aGagData, i, data );
 		TrieSetCell( g_tArrayPos, data[ GAG_AUTHID ], i );
+	}
+	
+	if( g_bUsingSQL )
+	{
+		new szQuery[ 128 ];
+		formatex( szQuery, charsmax( szQuery ), "DELETE FROM gagged_players WHERE player_steamid = '%s';", data[ GAG_AUTHID ] );
+		
+		SQL_ThreadQuery( g_hSqlTuple, "QueryDelete", szQuery );
+	}
+}
+
+public QueryDelete( iFailState, Handle:hQuery, szError[ ], iError, iData[ ], iDataSize, Float:flQueueTime )
+{
+	switch( iFailState )
+	{
+		case TQUERY_CONNECT_FAILED: log_amx( "Failed to connect to database: (%d) %s", iError, szError );
+		case TQUERY_QUERY_FAILED:   log_amx( "Failed delete query: (%d) %s", iError, szError );
 	}
 }
 
@@ -1201,4 +1454,122 @@ GetAccessBySteamID( const szSteamID[ ] )
 	}
 	
 	return 0;
+}
+
+strtotime(const string[])
+{
+	new szTemp[ 32 ];
+	new szYear[ 5 ], szMonth[ 3 ], szDay[ 3 ], szHour[ 3 ], szMinute[ 3 ], szSecond[ 3 ];
+	strtok( string, szYear,   charsmax( szYear   ), szTemp,   charsmax( szTemp   ), '-' );
+	strtok( szTemp, szMonth,  charsmax( szMonth  ), szTemp,   charsmax( szTemp   ), '-' );
+	strtok( szTemp, szDay,    charsmax( szDay    ), szTemp,   charsmax( szTemp   ), ' ' );
+	strtok( szTemp, szHour,   charsmax( szHour   ), szTemp,   charsmax( szTemp   ), ':' );
+	strtok( szTemp, szMinute, charsmax( szMinute ), szSecond, charsmax( szSecond ), ':' );
+	
+	return TimeToUnix( str_to_num( szYear ), str_to_num( szMonth ), str_to_num( szDay ), str_to_num( szHour ), str_to_num( szMinute ), str_to_num( szSecond ) );
+}
+
+AddGag( admin, player, iGagTime, iFlags )
+{
+	new szAdminName[ 32 ], szAdminIP[ 16 ];
+	
+	if( admin )
+	{
+		get_user_name( admin, szAdminName, charsmax( szAdminName ) );
+	}
+	else
+	{
+		copy( szAdminName, charsmax( szAdminName ), "SERVER" );
+	}
+	
+	get_user_ip( admin, szAdminIP, charsmax( szAdminIP ), 1 );
+	
+	new szPlayerName[ 32 ], szPlayerIP[ 16 ];
+	get_user_name( player, szPlayerName, charsmax( szPlayerName ) );
+	get_user_ip( player, szPlayerIP, charsmax( szPlayerIP ), 1 );
+	
+	new szDateNow[ DATE_SIZE ], szDateUngag[ DATE_SIZE ];
+	get_time( DATETIME_FORMAT, szDateNow, charsmax( szDateNow ) );
+	format_time( szDateUngag, charsmax( szDateUngag ), DATETIME_FORMAT, get_systime( ) + iGagTime );
+	
+	new szFlags[ 4 ];
+	get_flags( iFlags, szFlags, charsmax( szFlags ) );
+	
+	new szQuery[ 256 ];
+	formatex( szQuery, charsmax( szQuery ), "REPLACE INTO gagged_players \
+		(admin_name, admin_steamid, admin_ip, player_name, player_steamid, player_ip, date_gagged, date_ungag, gag_seconds, gag_flags) \
+		VALUES \
+		(^"%s^", ^"%s^", ^"%s^", ^"%s^", ^"%s^", ^"%s^", ^"%s^", ^"%s^", %d, ^"%s^");",\
+		szAdminName,  g_szAuthid[ admin  ], szAdminIP,\
+		szPlayerName, g_szAuthid[ player ], szPlayerIP,\
+		szDateNow, szDateUngag, iGagTime, szFlags );
+	
+	SQL_ThreadQuery( g_hSqlTuple, "QueryAdd", szQuery );
+}
+
+public QueryAdd( iFailState, Handle:hQuery, szError[ ], iError, iData[ ], iDataSize, Float:flQueueTime )
+{
+	switch( iFailState )
+	{
+		case TQUERY_CONNECT_FAILED: log_amx( "Failed to connect to database: (%d) %s", iError, szError );
+		case TQUERY_QUERY_FAILED:   log_amx( "Failed add gag query: (%d) %s", iError, szError );
+	}
+}
+
+// CODE BELOW FROM BUGSY'S UNIX TIME INCLUDE
+// 
+
+stock const YearSeconds[2] = 
+{ 
+	31536000,	//Normal year
+	31622400 	//Leap year
+};
+
+stock const MonthSeconds[12] = 
+{ 
+	2678400, //January	31 
+	2419200, //February	28
+	2678400, //March	31
+	2592000, //April	30
+	2678400, //May		31
+	2592000, //June		30
+	2678400, //July		31
+	2678400, //August	31
+	2592000, //September	30
+	2678400, //October	31
+	2592000, //November	30
+	2678400  //December	31
+};
+
+stock const DaySeconds = 86400;
+stock const HourSeconds = 3600;
+stock const MinuteSeconds = 60;
+
+stock TimeToUnix( const iYear , const iMonth , const iDay , const iHour , const iMinute , const iSecond )
+{
+	new i;
+	new iTimeStamp;
+
+	for ( i = 1970 ; i < iYear ; i++ )
+		iTimeStamp += YearSeconds[ IsLeapYear(i) ];
+
+	for ( i = 1 ; i < iMonth ; i++ )
+		iTimeStamp += SecondsInMonth( iYear , i );
+
+	iTimeStamp += ( ( iDay - 1 ) * DaySeconds );
+	iTimeStamp += ( iHour * HourSeconds );
+	iTimeStamp += ( iMinute * MinuteSeconds );
+	iTimeStamp += iSecond;
+
+	return iTimeStamp;
+}
+
+stock SecondsInMonth( const iYear , const iMonth ) 
+{
+	return ( ( IsLeapYear( iYear ) && ( iMonth == 2 ) ) ? ( MonthSeconds[iMonth - 1] + DaySeconds ) : MonthSeconds[iMonth - 1] );
+}
+
+stock IsLeapYear( const iYear ) 
+{
+	return ( ( (iYear % 4) == 0) && ( ( (iYear % 100) != 0) || ( (iYear % 400) == 0 ) ) );
 }
