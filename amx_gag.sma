@@ -87,7 +87,7 @@ new Handle:g_hSqlTuple;
 
 public plugin_init( )
 {
-	register_plugin( "AMXX Gag", "1.4.8", "xPaw & Exolent" );
+	register_plugin( "AMXX Gag", "1.4.9", "xPaw & Exolent" );
 	
 	register_clcmd( "say",        "CmdSay" );
 	register_clcmd( "say_team",   "CmdTeamSay" );
@@ -641,12 +641,8 @@ public CmdGagPlayer( const id, const iLevel, const iCid )
 		return PLUGIN_HANDLED;
 	}
 	
-	get_pcvar_string( g_pCvarDefaultFlags, szArg, charsmax( szArg ) );
-	new iFlags = read_flags( szArg );
-	
-	new iTimeUnit = GetTimeUnit( );
-	new iMaxTime = get_pcvar_num( g_pCvarMaxTime );
-	new iGagTime = clamp( get_pcvar_num( g_pCvarDefaultTime ), 1, iMaxTime );
+	new iFlags;
+	new iGagTime;
 	
 	read_argv( 2, szArg, 31 );
 	
@@ -654,7 +650,7 @@ public CmdGagPlayer( const id, const iLevel, const iCid )
 	{
 		if( is_str_num( szArg ) ) // Seconds entered
 		{
-			iGagTime = min( abs( str_to_num( szArg ) ), iMaxTime );
+			iGagTime = abs( str_to_num( szArg ) );
 		}
 		else
 		{
@@ -670,8 +666,24 @@ public CmdGagPlayer( const id, const iLevel, const iCid )
 		}
 	}
 	
-	// convert to seconds
-	iGagTime *= g_iTimeUnitMult[ iTimeUnit ];
+	GagPlayer( id, iPlayer, iGagTime, iFlags );
+	
+	return PLUGIN_HANDLED;
+}
+
+GagPlayer( id, iPlayer, iGagTime, iFlags )
+{
+	new iTimeUnit = GetTimeUnit( );
+	new iMaxTime = get_pcvar_num( g_pCvarMaxTime );
+	iGagTime = clamp( iGagTime, 1, iMaxTime ) * g_iTimeUnitMult[ iTimeUnit ];
+	
+	if( !iFlags )
+	{
+		new szFlags[ 27 ];
+		get_pcvar_string( g_pCvarDefaultFlags, szFlags, charsmax( szFlags ) );
+		
+		iFlags = read_flags( szFlags );
+	}
 	
 	new data[ GagData ];
 	data[ GAG_START ] = get_systime( );
@@ -718,10 +730,6 @@ public CmdGagPlayer( const id, const iLevel, const iCid )
 			entity_set_float( g_iThinker, EV_FL_nextthink, flGametime + iGagTime );
 	}
 	
-	
-	new szInfo[ 32 ], szAdmin[ 20 ];
-	get_user_name( id, szAdmin, 19 );
-	
 	if( g_bUsingSQL )
 	{
 		AddGag( id, iPlayer, iGagTime, iFlags );
@@ -730,6 +738,12 @@ public CmdGagPlayer( const id, const iLevel, const iCid )
 	{
 		SaveToFile( );
 	}
+	
+	new szName[ 20 ];
+	get_user_name( iPlayer, szName, 19 );
+	
+	new szInfo[ 32 ], szAdmin[ 20 ];
+	get_user_name( id, szAdmin, 19 );
 	
 	if( iGagTime > 0 )
 	{
@@ -746,8 +760,6 @@ public CmdGagPlayer( const id, const iLevel, const iCid )
 	console_print( id, "You have gagged ^"%s^" (%s) !", szName, szFrom );
 	
 	log_amx( "Gag: ^"%s<%s>^" has gagged ^"%s<%s>^" %s. (%s)", szAdmin, g_szAuthid[ id ], szName, g_szAuthid[ iPlayer ], szInfo, szFrom );
-	
-	return PLUGIN_HANDLED;
 }
 
 public CmdAddGag( const id, const iLevel, const iCid )
@@ -1016,14 +1028,45 @@ public ActionGagMenu( const id, const iKey )
 		{
 			new iPlayer = g_iMenuPlayers[ id ][ g_iMenuPosition[ id ] * PERPAGE + iKey ];
 			
-			if( !g_iMenuOption[ id ] )
-				client_cmd( id, "amx_ungag #%i", get_user_userid( iPlayer ) );
-			else
+			if( is_user_connected( iPlayer ) )
 			{
-				new szFlags[ 4 ];
-				get_flags( g_iMenuFlags[ id ], szFlags, 3 );
-				
-				client_cmd( id, "amx_gag #%i %i %s", get_user_userid( iPlayer ), ArrayGetCell( g_aGagTimes, g_iMenuOption[ id ] ), szFlags );
+				if( !g_iMenuOption[ id ] )
+				{
+					//client_cmd( id, "amx_ungag #%i", get_user_userid( iPlayer ) );
+					
+					new iArrayPos;
+					
+					if( TrieGetCell( g_tArrayPos, g_szAuthid[ iPlayer ], iArrayPos ) )
+					{
+						DeleteGag( iArrayPos );
+						
+						if( !g_bUsingSQL )
+						{
+							SaveToFile( );
+						}
+						
+						new szName[ 32 ];
+						get_user_name( iPlayer, szName, 31 );
+						
+						new szAdmin[ 32 ];
+						get_user_name( id, szAdmin, 31 );
+						
+						show_activity( id, szAdmin, "Has ungagged %s.", szName );
+						
+						console_print( id, "You have ungagged ^"%s^" !", szName );
+						
+						log_amx( "UnGag: ^"%s<%s>^" has ungagged ^"%s<%s>^"", szAdmin, g_szAuthid[ id ], szName, g_szAuthid[ iPlayer ] );
+					}
+				}
+				else if( !TrieKeyExists( g_tArrayPos, g_szAuthid[ iPlayer ] ) )
+				{
+					/*new szFlags[ 4 ];
+					get_flags( g_iMenuFlags[ id ], szFlags, 3 );
+					
+					client_cmd( id, "amx_gag #%i %i %s", get_user_userid( iPlayer ), ArrayGetCell( g_aGagTimes, g_iMenuOption[ id ] ), szFlags );*/
+					
+					GagPlayer( id, iPlayer, ArrayGetCell( g_aGagTimes, g_iMenuOption[ id ] ), g_iMenuFlags[ id ] );
+				}
 			}
 			
 			DisplayGagMenu( id, g_iMenuPosition[ id ] );
