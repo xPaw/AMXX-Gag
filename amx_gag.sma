@@ -674,7 +674,7 @@ public CmdGagPlayer( const id, const iLevel, const iCid )
 GagPlayer( id, iPlayer, iGagTime, iFlags )
 {
 	new iTimeUnit = GetTimeUnit( );
-	new iMaxTime = get_pcvar_num( g_pCvarMaxTime
+	new iMaxTime = get_pcvar_num( g_pCvarMaxTime );
 	
 	if( iGagTime )
 	{
