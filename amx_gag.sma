@@ -673,11 +673,11 @@ public CmdGagPlayer( const id, const iLevel, const iCid )
 
 GagPlayer( id, iPlayer, iGagTime, iFlags )
 {
-	new iTimeUnit = GetTimeUnit( );
-	new iMaxTime = get_pcvar_num( g_pCvarMaxTime );
-	
 	if( iGagTime )
 	{
+		new iTimeUnit = GetTimeUnit( );
+		new iMaxTime = get_pcvar_num( g_pCvarMaxTime );
+		
 		iGagTime = clamp( iGagTime, 1, iMaxTime ) * g_iTimeUnitMult[ iTimeUnit ];
 	}
 	
@@ -730,7 +730,7 @@ GagPlayer( id, iPlayer, iGagTime, iFlags )
 		new Float:flGametime = get_gametime( ), Float:flNextThink;
 		flNextThink = entity_get_float( g_iThinker, EV_FL_nextthink );
 		
-		if( !flNextThink || flNextThink > ( flGametime + iGagTime
+		if( !flNextThink || flNextThink > ( flGametime + iGagTime ) )
 		{
 			entity_set_float( g_iThinker, EV_FL_nextthink, flGametime + iGagTime );
 		}
