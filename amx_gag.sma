@@ -561,12 +561,16 @@ public QueryDeleteMultiple( iFailState, Handle:hQuery, szError[ ], iError, iData
 }
 
 public CmdSay( const id )
+{
 	return CheckSay( id, 0 );
+}
 
 public CmdTeamSay( const id )
+{
 	return CheckSay( id, 1 );
+}
 
-CheckSay( const id, const bTeam )
+CheckSay( const id, const bIsTeam )
 {
 	new iArrayPos;
 	if( TrieGetCell( g_tArrayPos, g_szAuthid[ id ], iArrayPos ) )
@@ -576,7 +580,7 @@ CheckSay( const id, const bTeam )
 		
 		new const iFlags[ ] = { GAG_CHAT, GAG_TEAMSAY };
 		
-		if( data[ GAG_FLAGS ] & iFlags[ bTeam ] )
+		if( data[ GAG_FLAGS ] & iFlags[ bIsTeam ] )
 		{
 			if( data[ GAG_TIME ] > 0 )
 			{
@@ -605,7 +609,7 @@ CheckSay( const id, const bTeam )
 				}
 			}
 			
-			client_print( id, print_center, "** You are gagged from%s chat! **", bTeam ? " team" : "" );
+			client_print( id, print_center, "** You are gagged from%s chat! **", bIsTeam ? " team" : "" );
 			
 			return PLUGIN_HANDLED;
 		}
@@ -642,7 +646,7 @@ public CmdGagPlayer( const id, const iLevel, const iCid )
 	}
 	
 	new iFlags;
-	new iGagTime;
+	new iGagTime = -1;
 	
 	read_argv( 2, szArg, 31 );
 	
@@ -673,10 +677,16 @@ public CmdGagPlayer( const id, const iLevel, const iCid )
 
 GagPlayer( id, iPlayer, iGagTime, iFlags )
 {
+	new iMaxTime = get_pcvar_num( g_pCvarMaxTime );
+	
+	if( iGagTime == -1 )
+	{
+		iGagTime = clamp( get_pcvar_num( g_pCvarDefaultTime ), 0, iMaxTime );
+	}
+	
 	if( iGagTime )
 	{
 		new iTimeUnit = GetTimeUnit( );
-		new iMaxTime = get_pcvar_num( g_pCvarMaxTime );
 		
 		iGagTime = clamp( iGagTime, 1, iMaxTime ) * g_iTimeUnitMult[ iTimeUnit ];
 	}
@@ -815,9 +825,8 @@ public CmdAddGag( const id, const iLevel, const iCid )
 	get_pcvar_string( g_pCvarDefaultFlags, szArg, charsmax( szArg ) );
 	new iFlags = read_flags( szArg );
 	
-	new iTimeUnit = GetTimeUnit( );
 	new iMaxTime = get_pcvar_num( g_pCvarMaxTime );
-	new iGagTime = clamp( get_pcvar_num( g_pCvarDefaultTime ), 1, iMaxTime );
+	new iGagTime = clamp( get_pcvar_num( g_pCvarDefaultTime ), 0, iMaxTime );
 	
 	read_argv( 2, szArg, 31 );
 	
@@ -840,6 +849,8 @@ public CmdAddGag( const id, const iLevel, const iCid )
 			iFlags = read_flags( szArg );
 		}
 	}
+	
+	new iTimeUnit = GetTimeUnit( );
 	
 	// convert to seconds
 	iGagTime *= g_iTimeUnitMult[ iTimeUnit ];
@@ -887,6 +898,7 @@ public CmdAddGag( const id, const iLevel, const iCid )
 	
 	if( g_bUsingSQL )
 	{
+		// BUGBUG: This is CmdAddGag. iPlayer is 0...
 		AddGag( id, iPlayer, iGagTime, iFlags );
 	}
 	else
