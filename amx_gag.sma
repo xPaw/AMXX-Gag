@@ -19,7 +19,9 @@ enum _:GagData
 	GAG_AUTHID[ 35 ],
 	GAG_TIME,
 	GAG_START,
-	GAG_FLAGS
+	GAG_FLAGS,
+	GAG_SAVE,
+	GAG_NOTIFY
 };
 
 enum _:TimeUnit
@@ -87,7 +89,7 @@ new Handle:g_hSqlTuple;
 
 public plugin_init( )
 {
-	register_plugin( "AMXX Gag", "1.4.9", "xPaw & Exolent" );
+	register_plugin( "AMXX Gag", "1.5.0", "xPaw & Exolent" );
 	
 	register_clcmd( "say",        "CmdSay" );
 	register_clcmd( "say_team",   "CmdTeamSay" );
@@ -156,6 +158,139 @@ public plugin_init( )
 	
 	// set server's SteamID to "SERVER"
 	copy( g_szAuthid[ 0 ], charsmax( g_szAuthid[ ] ), "SERVER" );
+}
+
+public plugin_natives( )
+{
+	register_library( "amx_gag" );
+	
+	register_native( "is_user_gagged" , "_is_user_gagged"  );
+	register_native( "set_user_gagged", "_set_user_gagged" );
+	register_native( "get_gagtime"    , "_get_gagtime"     );
+	
+	register_native( "gag_check" , "_gag_check"  );
+	register_native( "gag_add"   , "_gag_add"    );
+	register_native( "gag_remove", "_gag_remove" );
+}
+
+public _is_user_gagged( iPlugin, iParams )
+{
+	new iPlayer = get_param( 1 );
+	
+	return ( is_user_connected( iPlayer ) && TrieKeyExists( g_tArrayPos, g_szAuthid[ iPlayer ] ) );
+}
+
+public _set_user_gagged( iPlugin, iParams )
+{
+	new iPlayer  = get_param( 1 );
+	new bGagged  = get_param( 2 );
+	new iSeconds = get_param( 3 );
+	new bSave    = get_param( 4 );
+	new iFlags   = get_param( 5 );
+	
+	if( !is_user_connected( iPlayer ) )
+	{
+		return 0;
+	}
+	
+	if( bGagged )
+	{
+		if( TrieKeyExists( g_tArrayPos, g_szAuthid[ iPlayer ] ) )
+		{
+			return 0;
+		}
+		
+		GagPlayer( 0, iPlayer, g_szAuthid[ iPlayer ], iSeconds, iFlags, bSave, 0 );
+	}
+	else
+	{
+		new iArrayPos;
+		
+		if( !TrieGetCell( g_tArrayPos, g_szAuthid[ iPlayer ], iArrayPos ) )
+		{
+			return 0;
+		}
+		
+		new data[ GagData ];
+		ArrayGetArray( g_aGagData, iArrayPos, data );
+		
+		DeleteGag( iArrayPos );
+	
+		if( !g_bUsingSQL && data[ GAG_SAVE ] )
+		{
+			SaveToFile( );
+		}
+	}
+	
+	return 1;
+}
+
+public _get_gagtime( iPlugin, iParams )
+{
+	new iPlayer = get_param( 1 );
+	new iTime = 0;
+	
+	if( is_user_connected( iPlayer ) )
+	{
+		new iArrayPos;
+		
+		if( TrieGetCell( g_tArrayPos, g_szAuthid[ iPlayer ], iArrayPos ) )
+		{
+			new data[ GagData ];
+			ArrayGetArray( g_aGagData, iArrayPos, data );
+			
+			if( data[ GAG_TIME ] > 0 )
+			{
+				iTime = data[ GAG_START ] + data[ GAG_TIME ] - get_systime( );
+			}
+		}
+	}
+	
+	return iTime;
+}
+
+public _gag_check( iPlugin, iParams )
+{
+	new szAuth[ 35 ];
+	get_string( 1, szAuth, charsmax( szAuth ) );
+	
+	return _:TrieKeyExists( g_tArrayPos, szAuth );
+}
+
+public _gag_add( iPlugin, iParams )
+{
+	new szAuth[ 35 ];
+	get_string( 1, szAuth, charsmax( szAuth ) );
+	
+	if( TrieKeyExists( g_tArrayPos, szAuth ) )
+	{
+		return 0;
+	}
+	
+	new iSeconds = get_param( 2 );
+	new bSave    = get_param( 3 );
+	new iFlags   = get_param( 4 );
+	
+	GagPlayer( 0, 0, szAuth, iSeconds, iFlags, bSave, 0 );
+	
+	return 1;
+}
+
+public _gag_remove( iPlugin, iParams )
+{
+	new szAuth[ 35 ];
+	get_string( 1, szAuth, charsmax( szAuth ) );
+	
+	new iArrayPos;
+	
+	if( !TrieGetCell( g_tArrayPos, szAuth, iArrayPos ) )
+	{
+		return 0;
+	}
+	
+	DeleteGag( iArrayPos );
+	
+	return 1;
 }
 
 public plugin_cfg( )
@@ -244,8 +379,15 @@ InitSQL( )
 				
 				if( SQL_NumResults( hQuery ) )
 				{
+					new iSystime = get_systime( );
+					new iShortestTime = 999999;
+					
 					new data[ GagData ];
 					new szFlags[ 4 ];
+					new iTimeLeft;
+					
+					data[ GAG_SAVE   ] = 1;
+					data[ GAG_NOTIFY ] = 1;
 					
 					new iFieldSteamID = SQL_FieldNameToNum( hQuery, "player_steamid" );
 					new iFieldDateGagged = SQL_FieldNameToNum( hQuery, "date_gagged" );
@@ -262,11 +404,26 @@ InitSQL( )
 						data[ GAG_START ] = strtotime( szDate );
 						data[ GAG_FLAGS ] = read_flags( szFlags );
 						
+						if( data[ GAG_TIME ] > 0 )
+						{
+							iTimeLeft = data[ GAG_START ] + data[ GAG_TIME ] - iSystime;
+							
+							if( iShortestTime > iTimeLeft )
+							{
+								iShortestTime = iTimeLeft;
+							}
+						}
+						
 						ArrayPushArray( g_aGagData, data );
 						TrieSetCell( g_tArrayPos, data[ GAG_AUTHID ], g_iGagged );
 						g_iGagged++;
 						
 						SQL_NextRow( hQuery );
+					}
+					
+					if( iShortestTime < 999999 )
+					{
+						entity_set_float( g_iThinker, EV_FL_nextthink, get_gametime( ) + iShortestTime );
 					}
 				}
 			}
@@ -670,12 +827,12 @@ public CmdGagPlayer( const id, const iLevel, const iCid )
 		}
 	}
 	
-	GagPlayer( id, iPlayer, iGagTime, iFlags );
+	GagPlayer( id, iPlayer, g_szAuthid[ iPlayer ], iGagTime, iFlags );
 	
 	return PLUGIN_HANDLED;
 }
 
-GagPlayer( id, iPlayer, iGagTime, iFlags )
+GagPlayer( id, iPlayer, const szPlayerAuth[ ], iGagTime, iFlags, bSave=1, bNotify=1 )
 {
 	new iMaxTime = get_pcvar_num( g_pCvarMaxTime );
 	
@@ -700,38 +857,15 @@ GagPlayer( id, iPlayer, iGagTime, iFlags )
 	}
 	
 	new data[ GagData ];
-	data[ GAG_START ] = get_systime( );
-	data[ GAG_TIME ]  = iGagTime;
-	data[ GAG_FLAGS ] = iFlags;
-	copy( data[ GAG_AUTHID ], 34, g_szAuthid[ iPlayer ] );
+	data[ GAG_START ]  = get_systime( );
+	data[ GAG_TIME ]   = iGagTime;
+	data[ GAG_FLAGS ]  = iFlags;
+	data[ GAG_SAVE ]   = bSave;
+	data[ GAG_NOTIFY ] = bNotify;
+	copy( data[ GAG_AUTHID ], 34, szPlayerAuth );
 	
-	TrieSetCell( g_tArrayPos, g_szAuthid[ iPlayer ], g_iGagged );
+	TrieSetCell( g_tArrayPos, szPlayerAuth, g_iGagged );
 	ArrayPushArray( g_aGagData, data );
-	
-	new szFrom[ 64 ];
-	
-	if( iFlags & GAG_CHAT )
-	{
-		copy( szFrom, 63, "say" );
-	}
-	
-	if( iFlags & GAG_TEAMSAY )
-	{
-		if( !szFrom[ 0 ] )
-			copy( szFrom, 63, "say_team" );
-		else
-			add( szFrom, 63, " / say_team" );
-	}
-	
-	if( iFlags & GAG_VOICE )
-	{
-		set_speak( iPlayer, SPEAK_MUTED );
-		
-		if( !szFrom[ 0 ] )
-			copy( szFrom, 63, "voicecomm" );
-		else
-			add( szFrom, 63, " / voicecomm" );
-	}
 	
 	g_iGagged++;
 	
@@ -746,36 +880,87 @@ GagPlayer( id, iPlayer, iGagTime, iFlags )
 		}
 	}
 	
-	if( g_bUsingSQL )
+	if( bSave )
 	{
-		AddGag( id, iPlayer, iGagTime, iFlags );
+		if( g_bUsingSQL )
+		{
+			new szPlayerName[ 32 ], szPlayerIP[ 32 ];
+			
+			if( iPlayer )
+			{
+				get_user_name( iPlayer, szPlayerName, charsmax( szPlayerName ) );
+				get_user_ip( iPlayer, szPlayerIP, charsmax( szPlayerIP ), 1 );
+			}
+			else
+			{
+				szPlayerName[ 0 ] = szPlayerIP[ 0 ] = '?';
+			}
+			
+			AddGag( id, g_szAuthid[ iPlayer ], szPlayerName, szPlayerIP, iGagTime, iFlags );
+		}
+		else
+		{
+			SaveToFile( );
+		}
 	}
-	else
+	
+	if( bNotify )
 	{
-		SaveToFile( );
+		new szFrom[ 64 ];
+		
+		if( iFlags & GAG_CHAT )
+		{
+			copy( szFrom, 63, "say" );
+		}
+		
+		if( iFlags & GAG_TEAMSAY )
+		{
+			if( !szFrom[ 0 ] )
+				copy( szFrom, 63, "say_team" );
+			else
+				add( szFrom, 63, " / say_team" );
+		}
+		
+		if( iFlags & GAG_VOICE )
+		{
+			set_speak( iPlayer, SPEAK_MUTED );
+			
+			if( !szFrom[ 0 ] )
+				copy( szFrom, 63, "voicecomm" );
+			else
+				add( szFrom, 63, " / voicecomm" );
+		}
+		
+		new szName[ 64 ];
+		
+		if( iPlayer )
+		{
+			get_user_name( iPlayer, szName, 19 );
+		}
+		else
+		{
+			formatex( szName, charsmax( szName ), "a non-connected player <%s>", szPlayerAuth );
+		}
+		
+		new szInfo[ 32 ], szAdmin[ 20 ];
+		get_user_name( id, szAdmin, 19 );
+		
+		if( iGagTime > 0 )
+		{
+			new iLen = copy( szInfo, 31, "for " );
+			GetTimeLength( iGagTime, szInfo[ iLen ], charsmax( szInfo ) - iLen );
+		}
+		else
+		{
+			copy( szInfo, 31, "permanently" );
+		}
+		
+		show_activity( id, szAdmin, "Has gagged %s from speaking %s! (%s)", szName, szInfo, szFrom );
+		
+		console_print( id, "You have gagged ^"%s^" (%s) !", szName, szFrom );
+		
+		log_amx( "Gag: ^"%s<%s>^" has gagged ^"%s<%s>^" %s. (%s)", szAdmin, g_szAuthid[ id ], szName, szPlayerAuth, szInfo, szFrom );
 	}
-	
-	new szName[ 20 ];
-	get_user_name( iPlayer, szName, 19 );
-	
-	new szInfo[ 32 ], szAdmin[ 20 ];
-	get_user_name( id, szAdmin, 19 );
-	
-	if( iGagTime > 0 )
-	{
-		new iLen = copy( szInfo, 31, "for " );
-		GetTimeLength( iGagTime, szInfo[ iLen ], charsmax( szInfo ) - iLen );
-	}
-	else
-	{
-		copy( szInfo, 31, "permanently" );
-	}
-	
-	show_activity( id, szAdmin, "Has gagged %s from speaking %s! (%s)", szName, szInfo, szFrom );
-	
-	console_print( id, "You have gagged ^"%s^" (%s) !", szName, szFrom );
-	
-	log_amx( "Gag: ^"%s<%s>^" has gagged ^"%s<%s>^" %s. (%s)", szAdmin, g_szAuthid[ id ], szName, g_szAuthid[ iPlayer ], szInfo, szFrom );
 }
 
 public CmdAddGag( const id, const iLevel, const iCid )
@@ -898,8 +1083,7 @@ public CmdAddGag( const id, const iLevel, const iCid )
 	
 	if( g_bUsingSQL )
 	{
-		// BUGBUG: This is CmdAddGag. iPlayer is 0...
-		AddGag( id, iPlayer, iGagTime, iFlags );
+		AddGag( id, data[ GAG_AUTHID ], "?", "?", iGagTime, iFlags );
 	}
 	else
 	{
@@ -1083,7 +1267,7 @@ public ActionGagMenu( const id, const iKey )
 					
 					client_cmd( id, "amx_gag #%i %i %s", get_user_userid( iPlayer ), ArrayGetCell( g_aGagTimes, g_iMenuOption[ id ] ), szFlags );*/
 					
-					GagPlayer( id, iPlayer, ArrayGetCell( g_aGagTimes, g_iMenuOption[ id ] ), g_iMenuFlags[ id ] );
+					GagPlayer( id, iPlayer, g_szAuthid[ iPlayer ], ArrayGetCell( g_aGagTimes, g_iMenuOption[ id ] ), g_iMenuFlags[ id ] );
 				}
 			}
 			
@@ -1284,7 +1468,7 @@ DeleteGag( const iArrayPos )
 		TrieSetCell( g_tArrayPos, data[ GAG_AUTHID ], i );
 	}
 	
-	if( g_bUsingSQL )
+	if( g_bUsingSQL && data[ GAG_SAVE ] )
 	{
 		new szQuery[ 128 ];
 		formatex( szQuery, charsmax( szQuery ), "DELETE FROM gagged_players WHERE player_steamid = '%s';", data[ GAG_AUTHID ] );
@@ -1311,6 +1495,9 @@ LoadFromFile( )
 		new szData[ 128 ], szTime[ 16 ], szStart[ 16 ], szFlags[ 4 ];
 		new data[ GagData ], iSystime = get_systime( ), iTimeLeft, iShortestTime = 999999;
 		new bool:bRemovedGags = false;
+		
+		data[ GAG_SAVE   ] = 1;
+		data[ GAG_NOTIFY ] = 1;
 		
 		while( !feof( hFile ) )
 		{
@@ -1380,9 +1567,12 @@ SaveToFile( )
 		{
 			ArrayGetArray( g_aGagData, i, data );
 			
-			get_flags( data[ GAG_FLAGS ], szFlags, charsmax( szFlags ) );
-			
-			fprintf( hFile, "^"%s^" ^"%i^" ^"%i^" ^"%s^"^n", data[ GAG_AUTHID ], data[ GAG_TIME ], data[ GAG_START ], szFlags );
+			if( data[ GAG_SAVE ] )
+			{
+				get_flags( data[ GAG_FLAGS ], szFlags, charsmax( szFlags ) );
+				
+				fprintf( hFile, "^"%s^" ^"%i^" ^"%i^" ^"%s^"^n", data[ GAG_AUTHID ], data[ GAG_TIME ], data[ GAG_START ], szFlags );
+			}
 		}
 		
 		fclose( hFile );
@@ -1530,7 +1720,7 @@ strtotime(const string[])
 	return TimeToUnix( str_to_num( szYear ), str_to_num( szMonth ), str_to_num( szDay ), str_to_num( szHour ), str_to_num( szMinute ), str_to_num( szSecond ) );
 }
 
-AddGag( admin, player, iGagTime, iFlags )
+AddGag( admin, const szPlayerAuth[ ], const szPlayerName[ ], const szPlayerIP[ ], iGagTime, iFlags )
 {
 	new szAdminName[ 32 ], szAdminIP[ 16 ];
 	
@@ -1545,10 +1735,6 @@ AddGag( admin, player, iGagTime, iFlags )
 	
 	get_user_ip( admin, szAdminIP, charsmax( szAdminIP ), 1 );
 	
-	new szPlayerName[ 32 ], szPlayerIP[ 16 ];
-	get_user_name( player, szPlayerName, charsmax( szPlayerName ) );
-	get_user_ip( player, szPlayerIP, charsmax( szPlayerIP ), 1 );
-	
 	new szDateNow[ DATE_SIZE ], szDateUngag[ DATE_SIZE ];
 	get_time( DATETIME_FORMAT, szDateNow, charsmax( szDateNow ) );
 	format_time( szDateUngag, charsmax( szDateUngag ), DATETIME_FORMAT, get_systime( ) + iGagTime );
@@ -1561,8 +1747,8 @@ AddGag( admin, player, iGagTime, iFlags )
 		(admin_name, admin_steamid, admin_ip, player_name, player_steamid, player_ip, date_gagged, date_ungag, gag_seconds, gag_flags) \
 		VALUES \
 		(^"%s^", ^"%s^", ^"%s^", ^"%s^", ^"%s^", ^"%s^", ^"%s^", ^"%s^", %d, ^"%s^");",\
-		szAdminName,  g_szAuthid[ admin  ], szAdminIP,\
-		szPlayerName, g_szAuthid[ player ], szPlayerIP,\
+		szAdminName,  g_szAuthid[ admin ], szAdminIP,\
+		szPlayerName, szPlayerAuth       , szPlayerIP,\
 		szDateNow, szDateUngag, iGagTime, szFlags );
 	
 	SQL_ThreadQuery( g_hSqlTuple, "QueryAdd", szQuery );
