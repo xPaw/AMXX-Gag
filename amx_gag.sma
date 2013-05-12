@@ -1712,7 +1712,7 @@ AddGag( admin, const szPlayerSteamID[ ], const szPlayerName[ ], const szPlayerIP
 	new szFlags[ 4 ];
 	get_flags( iFlags, szFlags, charsmax( szFlags ) );
 	
-	new szQuery[ 256 ];
+	new szQuery[ 768 ];
 	formatex( szQuery, charsmax( szQuery ), "REPLACE INTO gagged_players \
 		(admin_name, admin_steamid, admin_ip, player_name, player_steamid, player_ip, date_gagged, date_ungag, gag_seconds, gag_flags) \
 		VALUES \
