@@ -690,7 +690,7 @@ public FwdThink( const iEntity )
 					szQuery[ iLen++ ] = ';'
 					szQuery[ iLen ] = 0;
 					
-					SQL_ThreadQuery( g_hSqlTuple, "QueryDeleteMultiple", szQuery );
+					SQL_ThreadQuery( g_hSqlTuple, "HandleDefaultQuery", szQuery );
 					
 					szQuery[ ( iLen = iDefaultLen ) ] = 0;
 				}
@@ -701,7 +701,7 @@ public FwdThink( const iEntity )
 			szQuery[ iLen++ ] = ';';
 			szQuery[ iLen ] = 0;
 			
-			SQL_ThreadQuery( g_hSqlTuple, "QueryDeleteMultiple", szQuery );
+			SQL_ThreadQuery( g_hSqlTuple, "HandleDefaultQuery", szQuery );
 		}
 		
 		ArrayDestroy( aRemoveSteamIDs );
@@ -1757,7 +1757,7 @@ public HandleDefaultQuery( iFailState, Handle:hQuery, szError[ ], iError, iData[
 		switch( iFailState )
 		{
 			case TQUERY_CONNECT_FAILED: log_amx( "Failed to connect to database: (%d) %s", iError, szError );
-			case TQUERY_QUERY_FAILED:   log_amx( "Failed add gag query: (%d) %s", iError, szError );
+			case TQUERY_QUERY_FAILED:   log_amx( "Failed to execute query: (%d) %s", iError, szError );
 		}
 	}
 }
