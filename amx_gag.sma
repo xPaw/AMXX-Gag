@@ -1425,17 +1425,21 @@ DeleteAllGags( )
 		ArrayGetArray( g_aGagData, i, data );
 		
 		iPlayer = find_player( "c", data[ GAG_STEAMID ] );
+		
 		if( is_user_connected( iPlayer ) )
+		{
 			set_speak( iPlayer, SPEAK_NORMAL );
+		}
 	}
 	
 	ArrayClear( g_aGagData );
 	TrieClear( g_tArrayPos );
+	
 	g_iGagged = 0;
 	
 	if( g_bUsingSQL )
 	{
-		SQL_ThreadQuery( g_hSqlTuple, "HandleDefaultQuery", "DELETE FROM gagged_players" );
+		SQL_ThreadQuery( g_hSqlTuple, "HandleDefaultQuery", "TRUNCATE TABLE gagged_players" );
 	}
 }
 
@@ -1447,12 +1451,16 @@ DeleteGag( const iArrayPos )
 	if( data[ GAG_FLAGS ] & GAG_VOICE )
 	{
 		new iPlayer = find_player( "c", data[ GAG_STEAMID ] );
+		
 		if( is_user_connected( iPlayer ) )
+		{
 			set_speak( iPlayer, SPEAK_NORMAL );
+		}
 	}
 	
 	TrieDeleteKey( g_tArrayPos, data[ GAG_STEAMID ] );
 	ArrayDeleteItem( g_aGagData, iArrayPos );
+	
 	g_iGagged--;
 	
 	for( new i = iArrayPos; i < g_iGagged; i++ )
@@ -1487,7 +1495,10 @@ LoadFromFile( )
 			fgets( hFile, szData, charsmax( szData ) );
 			trim( szData );
 			
-			if( !szData[ 0 ] ) continue;
+			if( !szData[ 0 ] )
+			{
+				continue;
+			}
 			
 			parse( szData,
 				data[ GAG_STEAMID ], charsmax( data[ GAG_STEAMID ] ),
@@ -1496,8 +1507,11 @@ LoadFromFile( )
 				szFlags, charsmax( szFlags )
 			);
 			
-			// remove old gags
-			if( contain( szStart, "." ) > 0 ) continue;
+			// Remove old gags
+			if( contain( szStart, "." ) > 0 )
+			{
+				continue;
+			}
 			
 			data[ GAG_TIME ] = str_to_num( szTime );
 			data[ GAG_START ] = str_to_num( szStart );
