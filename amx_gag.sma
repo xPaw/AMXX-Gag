@@ -1052,6 +1052,7 @@ public CmdAddGag( const id, const iLevel, const iCid )
 	data[ GAG_START ] = get_systime( );
 	data[ GAG_TIME ]  = iGagTime;
 	data[ GAG_FLAGS ] = iFlags;
+	data[ GAG_SAVE ] = 1;
 	
 	TrieSetCell( g_tArrayPos, data[ GAG_STEAMID ], g_iGagged );
 	ArrayPushArray( g_aGagData, data );
