@@ -951,8 +951,8 @@ GagPlayer( id, iPlayer, const szPlayerSteamID[ ], iGagTime, iFlags, bSave=1, bNo
 			formatex( szName, charsmax( szName ), "a non-connected player <%s>", szPlayerSteamID );
 		}
 		
-		new szInfo[ 32 ], szAdmin[ 20 ];
-		get_user_name( id, szAdmin, 19 );
+		new szInfo[ 32 ], szAdmin[ 32 ];
+		get_user_name( id, szAdmin, 31 );
 		
 		if( iGagTime > 0 )
 		{
@@ -1099,8 +1099,8 @@ public CmdAddGag( const id, const iLevel, const iCid )
 		SaveToFile( );
 	}
 	
-	new szInfo[ 32 ], szAdmin[ 20 ];
-	get_user_name( id, szAdmin, 19 );
+	new szInfo[ 32 ], szAdmin[ 32 ];
+	get_user_name( id, szAdmin, 31 );
 	
 	if( iGagTime > 0 )
 	{
