@@ -368,7 +368,7 @@ InitSQL( )
 			get_time( DATETIME_FORMAT, szDate, charsmax( szDate ) );
 			
 			// Load all users
-			hQuery = SQL_PrepareQuery( hDb, "SELECT * FROM gagged_players WHERE date_ungag > '%s';", szDate );
+			hQuery = SQL_PrepareQuery( hDb, "SELECT * FROM gagged_players WHERE date_ungag > '%s' OR gag_seconds = 0;", szDate );
 			
 			if( !SQL_Execute( hQuery ) )
 			{
